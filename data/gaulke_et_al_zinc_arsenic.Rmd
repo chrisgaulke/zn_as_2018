@@ -1,0 +1,1141 @@
+---
+title: "My Notebook"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+
+```{r}
+options("stringsAsFactors"=F)
+library(RColorBrewer)
+library(ggplot2)
+library(vegan)
+library(reshape2)
+library(MASS)
+library(dplyr)
+```
+
+```{r}
+
+base_dir <-
+  "/Users/gaulkec/Chris/dev/R_projects/zfish_zinc_ho_lab/data/open_ref_otus/"
+#rarfied (15000 counts ) otu table
+
+
+zho_otus.df <- read.table(
+  paste0(base_dir, "core_div_15000_cg/table_even15000.txt"),
+                               comment.char = "",
+                               skip =1,
+                               header = T,
+                               row.names = 1,
+                               sep = "\t")
+#tax file
+zho_otus.tax <- zho_otus.df[,ncol(zho_otus.df),drop=F]
+#get rid of tax in otu table
+zho_otus.df <- zho_otus.df[,-ncol(zho_otus.df),drop=F]
+
+
+#mapping file
+
+zho_mapping.df <- read.table(paste0("/Users/gaulkec/Chris/dev/R_projects/",
+"zfish_zinc_ho_lab/analysis/flat_files/zinc_all_mapping_with_metadata.txt"),
+                               sep = "\t",
+                               comment.char = "",
+                               header = T,
+                               row.names = 1)
+
+#phylotyped data
+
+#genus
+zho_genus.df <- read.table(paste0(base_dir,
+       "core_div_15000_cg/table_even_15000_taxonomy/table_even15000_L6.txt"),
+                           header = T, row.names =1 )
+
+zho_genus.df <- zho_genus.df[, rownames(zho_mapping.df)]
+
+
+#Make a 5wk mapping file for some analyses
+
+zho_5wk_mapping.df <- zho_mapping.df[which(zho_mapping.df$Week == 5),
+                                     ,drop=F]
+
+zho_5wk_mapping.df <- cbind( zho_5wk_mapping.df,
+                             As_stat = rep(c(0,1,0,1),
+                                           times=c(8,16,8,16)),
+                             As_conc = rep(c(0,50,500,0,50,500),
+                                           times=c(8,8,8,8,8,8))
+)
+
+
+#make wk five OTU matrix
+zho_5wk_otus.df <- zho_otus.df[,which(
+  colnames(zho_otus.df) %in% rownames(zho_mapping.df[
+    which(zho_mapping.df$Week ==5),])),drop=F]
+
+zho_5wk_otus.df <- zho_5wk_otus.df[-which(rowSums(zho_5wk_otus.df) ==0),,drop=F]
+
+#make wk five Genus
+zho_5wk_genus.df <- zho_genus.df[,which(
+  colnames(zho_genus.df) %in% rownames(zho_mapping.df[
+    which(zho_mapping.df$Week ==5),])),drop=F]
+
+zho_5wk_genus.df <- zho_5wk_genus.df[-which(rowSums(
+  zho_5wk_genus.df) ==0),,drop=F]
+
+
+```
+
+Figure 1 
+
+```{r}
+
+#Plasma zinc
+pzinc.plot <- ggplot(zho_5wk_mapping.df, aes(x = factor(As_conc,
+                                               levels = c("0", "50", "500")),
+                                    y = as.numeric(zinc_plasma),
+                                    fill = factor(zinc_stat,
+                                                  levels = c("ZA", "MZD"))))
+
+
+pzinc.plot +
+  geom_boxplot(position = "dodge") +
+  geom_point(position = position_dodge(width =.75),size = 2)+
+  theme(text = element_text(size=20),
+        axis.text.x  = element_text(colour = "black"),
+        #axis.ticks.x = element_blank(),
+        axis.text.y  = element_text(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_blank()
+  ) +
+  ylab("Plasma Zn (µg/ml)") +
+  xlab("Arsenic (ppb)") +
+  scale_fill_manual("Diet", labels = c("ZA", "MZD"),
+                    values = c("darkgrey", "steelblue"))
+
+
+summary(aov(log(zinc_plasma) ~zinc_stat*as.factor(As_conc),
+            data = zho_5wk_mapping.df))
+
+zinc_plasma.aov <- aov(log(zinc_plasma) ~zinc_stat*as.factor(As_conc),
+            data = zho_5wk_mapping.df)
+
+TukeyHSD(zinc_plasma.aov)
+
+
+#Mouse Weight
+zn_as_mouse_wt.df <- read.table("/Users/gaulkec/Chris/dev/R_projects/zfish_zinc_ho_lab/data/Victer_mouse_study_3_weight.txt",
+                                sep = "\t",
+                                row.names =1,
+                                header=T)
+
+zn_as_mouse_wt.df <- cbind(zn_as_mouse_wt.df,
+                           zs = rep(c("za", "mzd"), times = c(24,24)),
+                           as = rep(c(0,50,500,0,50,500),
+                                    times = c(8,8,8,8,8,8)),
+                           id = row.names(zn_as_mouse_wt.df))
+
+zn_as_mouse_wt.df <- melt(zn_as_mouse_wt.df,id.vars = c('zs', 'as', 'id'))
+
+
+zn_as_mouse_wt.summary  <- summarise(group_by(zn_as_mouse_wt.df, zs,as,variable),
+                                     mean(value), sd(value), sd(value)/sqrt(8), median(value))
+
+colnames(zn_as_mouse_wt.summary) <- c("zs", "as", "week", "mean", "sd", "se", "median")
+
+
+zn_as_mouse_wt.summary <- as.data.frame(zn_as_mouse_wt.summary)
+zn_as_mouse_wt.summary <- cbind(zn_as_mouse_wt.summary,
+                                group = rep(c("mzd-0as",
+                                              "mzd-50as",
+                                              "mzd-500as",
+                                              "za-0as",
+                                              "za-50as",
+                                              "za-500as"),
+                                            times = c(12,
+                                                      12,
+                                                      12,
+                                                      12,
+                                                      12,
+                                                      12))
+)
+
+mouse_weight.plot <- ggplot(zn_as_mouse_wt.summary,
+                            aes(x = week,
+                                y = mean,
+                                colour = as.factor(as),
+                                group = group
+                            )
+)
+
+
+mouse_weight.plot +
+  geom_line(size = 1, aes(linetype = zs))+
+  geom_point(size =2)+
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.1) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        text = element_text(size=20),
+        axis.text.x = element_text(angle=45, vjust=1,
+                                   hjust= 1, colour = "black"),
+        axis.text.y = element_text(colour = "black"),
+        legend.key = element_blank()
+  ) +
+  scale_color_hue("Arsenic (ppb)", l = 50, c = 50)+
+  scale_linetype_discrete("Diet") +
+  ylab("Weight (g)") +
+  xlab("Week")
+
+
+#test of wt gain
+
+delta_wt <- zn_as_mouse_wt.df[529:576, "value"] -
+  zn_as_mouse_wt.df[1:48, "value"]
+
+dwt.df <- cbind(zn_as_mouse_wt.df$zs[1:48],
+                zn_as_mouse_wt.df$as[1:48],
+                delta_wt)
+
+colnames(dwt.df) <- c("zinc", "arsenic", "weight")
+dwt.df <- as.data.frame(dwt.df)
+
+dwt.df$weight <- as.numeric(dwt.df$weight)
+dwt.df$arsenic <- as.factor(dwt.df$arsenic)
+dwt.df$zinc <- as.factor(dwt.df$zinc)
+
+wk0.wts <- zn_as_mouse_wt.df[which(zn_as_mouse_wt.df$variable == "wk0"),"value"]
+wk0.groups <- paste0(
+  zn_as_mouse_wt.df[which(zn_as_mouse_wt.df$variable == "wk0"),"as"],
+  zn_as_mouse_wt.df[which(zn_as_mouse_wt.df$variable == "wk0"),"zs"])
+
+wk0.aov <- aov(wk0.wts ~ wk0.groups)
+summary(aov(wk0.wts ~ wk0.groups))
+
+TukeyHSD(wk0.aov)
+
+wk5.wts <- zn_as_mouse_wt.df[which(zn_as_mouse_wt.df$variable == "wk5"),"value"]
+wk5.groups <- paste0(
+  zn_as_mouse_wt.df[which(zn_as_mouse_wt.df$variable == "wk5"),"as"],
+  zn_as_mouse_wt.df[which(zn_as_mouse_wt.df$variable == "wk5"),"zs"])
+
+wk5.aov <- aov(wk5.wts ~ wk5.groups)
+summary(aov(wk5.wts ~ wk5.groups))
+
+TukeyHSD(wk5.aov)
+
+delta_wt.aov <- aov((wk5.wts - wk0.wts) ~  wk5.groups)
+TukeyHSD(delta_wt.aov)
+
+```
+
+Figure 2
+```{r}
+
+#adiponectin
+summary(aov(log(adiponectin) ~ zinc_stat*as.factor(As_conc),
+            data = zho_5wk_mapping.df))
+
+zinc_adiponectin.aov <- aov(log(adiponectin) ~zinc_stat*as.factor(As_conc),
+                       data = zho_5wk_mapping.df)
+
+
+adiponectin.plot <- ggplot(zho_5wk_mapping.df, aes(x = factor(As_conc,
+                                                     levels = c("0", "50", "500")),
+                                          y = as.numeric(adiponectin),
+                                          fill = factor(zinc_stat,
+                                                        levels = c("ZA", "MZD"))))
+
+adiponectin.plot +
+  geom_boxplot(position = "dodge") +
+  geom_point(position = position_dodge(width =.75),size = 2)+
+  theme(text = element_text(size=20),
+        axis.text.x  = element_text(colour = "black"),
+        #axis.ticks.x = element_blank(),
+        axis.text.y  = element_text(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_blank()
+  ) +
+  ylab("Adiponectin (µg/ml)") +
+  xlab("Arsenic (ppb)") +
+  scale_fill_manual("Diet", labels = c("ZA", "MZD"),
+                    values = c("darkgrey", "steelblue"))
+
+
+#comet
+
+summary(aov(log(comet) ~ zinc_stat*as.factor(As_conc),
+            data = zho_5wk_mapping.df))
+
+zinc_comet.aov <- aov(log(comet) ~zinc_stat*as.factor(As_conc),
+                            data = zho_5wk_mapping.df)
+
+
+comet.plot <- ggplot(zho_5wk_mapping.df, aes(x = factor(As_conc,
+                                               levels = c("0", "50", "500")),
+                                    y = as.numeric(comet),
+                                    fill = factor(zinc_stat,
+                                                  levels = c("ZA", "MZD"))))
+
+comet.plot +
+  geom_boxplot(position = "dodge") +
+  geom_point(position = position_dodge(width =.75),size = 2)+
+  theme(text = element_text(size=20),
+        axis.text.x  = element_text(colour = "black"),
+        #axis.ticks.x = element_blank(),
+        axis.text.y  = element_text(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_blank()
+  ) +
+  ylab("Average Tail Moment") +
+  xlab("Arsenic (ppb)") +
+  scale_fill_manual("Diet", labels = c("ZA", "MZD"),
+                    values = c("darkgrey", "steelblue"))
+
+```
+
+Figure 3
+
+```{r}
+
+zho_otus.df <- zho_otus.df[,rownames(zho_mapping.df)]
+bdiv_wk5.dist <- vegdist(t(zho_otus.df[,49:96]))
+
+bdiv_wk5.matrix <- as.matrix(vegdist(t(zho_otus.df[,49:96])))
+bdiv_wk5.matrix <- bdiv_wk5.matrix[rownames(zho_mapping.df[49:96,]),
+                                   rownames(zho_mapping.df[49:96,])]
+
+#Zinc Within group
+
+wilcox.test(x = bdiv_wk5.matrix[1:8, 1:8][upper.tri(bdiv_wk5.matrix[1:8, 1:8])],
+  y = bdiv_wk5.matrix[25:32, 25:32][upper.tri(bdiv_wk5.matrix[25:32, 25:32])])
+
+zinc_beta_within.df <- cbind( c( bdiv_wk5.matrix[1:8, 1:8][upper.tri(bdiv_wk5.matrix[1:8, 1:8])], 
+                              bdiv_wk5.matrix[25:32, 25:32][upper.tri(bdiv_wk5.matrix[25:32, 25:32])]),
+                           rep(c("ZA", "MZD"), times = c(length(bdiv_wk5.matrix[1:8, 1:8][upper.tri(bdiv_wk5.matrix[1:8, 1:8])]),
+                                                         length(bdiv_wk5.matrix[25:32, 25:32][upper.tri(bdiv_wk5.matrix[25:32, 25:32])]))))
+
+colnames(zinc_beta_within.df) <- c("bray", "group")
+zinc_beta_within.df <- as.data.frame(zinc_beta_within.df)
+zinc_beta_within.df$bray <- as.numeric(zinc_beta_within.df$bray)
+
+zinc_beta_within.df$group <- factor(zinc_beta_within.df$group, 
+                                    levels = c("ZA", "MZD")
+                                    )
+
+zinc_beta_within.plot <- ggplot(zinc_beta_within.df, 
+                                aes(
+                                  x = group,   
+                                  y = bray,
+                                    fill = group))
+zinc_beta_within.plot + 
+  geom_boxplot()+
+  geom_point(size = 2)+
+  scale_fill_manual( "Diet", labels = c("ZA", "MZD"),
+                    values = c("darkgrey", "steelblue"))+
+  theme(text = element_text(size=20),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.y  = element_text(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_blank())+
+  ylab("Intra-group beta-diversity")+
+  xlab("")
+
+#Zinc shannon diversity
+zho.shannon  <- vegan::diversity(zho_otus.df, MARGIN = 2, index = "shannon")
+
+zho_alpha_div.df <- cbind(zho_mapping.df,
+                          shannon    = zho.shannon[rownames(zho_mapping.df)],
+                          comb.group = paste0(
+                            zho_mapping.df$Group, "_", zho_mapping.df$Week)
+)
+#relevel
+zho_alpha_div.df$Group <- factor(zho_alpha_div.df$Group,
+                                 levels = c("ZA_0iAs",
+                                            "ZA_50iAs",
+                                            "ZA_500iAs",
+                                            "ZD_0iAs",
+                                            "ZD_50iAs",
+                                            "ZD_500iAs") )
+
+zho_alpha_div.df$Week <- as.factor(zho_alpha_div.df$Week)
+
+#split by week so we can do correlations
+zho_5wk_alpha_div.df <- zho_alpha_div.df[which(
+  zho_alpha_div.df$comb.group %in% c("ZA_0iAs_5", "ZD_0iAs_5")) ,,drop=F]
+
+wilcox.test(x = zho_5wk_alpha_div.df[
+  which(zho_5wk_alpha_div.df$comb.group == "ZA_0iAs_5"),"shannon"],
+            y = zho_5wk_alpha_div.df[
+  which(zho_5wk_alpha_div.df$comb.group == "ZD_0iAs_5"),"shannon"])
+
+
+shannon.plot <- ggplot(zho_5wk_alpha_div.df,
+                       aes(x = Group,
+                           y = shannon,
+                           fill = Group))
+
+shannon.plot +
+  geom_boxplot()+
+  geom_point(size = 3)+
+  scale_fill_manual( "Diet", labels = c("ZA", "MZD"),
+                    values = c("darkgrey", "steelblue"))+
+  theme(text = element_text(size=20),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.y  = element_text(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_blank()) + 
+  ylab("Shannon Entropy")+
+  xlab("")
+
+
+# Is there a significant association between plasma zinc and shannon entropy in
+# animals fed ZA and MZD diets (not exposed to arsenic)?
+cor.test(as.numeric(zho_5wk_alpha_div.df$zinc_plasma),
+         as.numeric(zho_5wk_alpha_div.df$shannon), method = "spearman")
+
+#sqrt transform and plot
+zinc_plasma_shannon.plot <- ggplot(zho_5wk_alpha_div.df,
+                                   aes(y= sqrt(zinc_plasma),
+                                       x= sqrt(shannon)))
+
+zinc_plasma_shannon.plot +
+  geom_smooth()+
+  geom_point(size = 3)+
+  theme(text = element_text(size=20),
+        axis.text.x  = element_text(colour = "black"),
+        axis.text.y  = element_text(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_blank())+
+        ylab("Plasma Zinc ug/ml")+
+        xlab("Shannon Entropy")
+
+```
+
+Figure 4 
+```{r}
+
+#ZA within group beta diversity
+kruskal.test(list(bdiv_wk5.matrix[1:8, 1:8][upper.tri(bdiv_wk5.matrix[1:8, 1:8])],
+                  bdiv_wk5.matrix[9:16,9:16][upper.tri(bdiv_wk5.matrix[9:16,9:16])],
+                  bdiv_wk5.matrix[17:24,17:24][upper.tri(bdiv_wk5.matrix[17:24,17:24])]
+))
+
+#posthoc
+
+pairwise.wilcox.test(c(bdiv_wk5.matrix[1:8, 1:8][upper.tri(bdiv_wk5.matrix[1:8, 1:8])],
+                       bdiv_wk5.matrix[9:16,9:16][upper.tri(bdiv_wk5.matrix[9:16,9:16])],
+                       bdiv_wk5.matrix[17:24,17:24][upper.tri(bdiv_wk5.matrix[17:24,17:24])]
+),
+
+g= rep(c(1,2,3), times = rep(28, times =3)),
+p.adjust.method = "fdr"
+)
+
+#plot
+
+za_within_beta_div.df <- cbind( bray = c(bdiv_wk5.matrix[1:8,1:8][upper.tri(bdiv_wk5.matrix[1:8, 1:8])],
+             bdiv_wk5.matrix[9:16,9:16][upper.tri(bdiv_wk5.matrix[9:16,9:16])],
+             bdiv_wk5.matrix[17:24,17:24][upper.tri(bdiv_wk5.matrix[17:24,17:24])]
+), group = rep(c("0ppm","50ppm","500ppm"), 
+times = c(length(bdiv_wk5.matrix[1:8,1:8][upper.tri(bdiv_wk5.matrix[1:8, 1:8])]),  length(bdiv_wk5.matrix[9:16,9:16][upper.tri(bdiv_wk5.matrix[9:16,9:16])]), length(bdiv_wk5.matrix[17:24,17:24][upper.tri(bdiv_wk5.matrix[17:24,17:24])])                                                                                                      )))
+
+za_within_beta_div.df <- as.data.frame(za_within_beta_div.df)
+za_within_beta_div.df$bray = as.numeric(za_within_beta_div.df$bray)
+za_within_beta_div.df$group = factor(za_within_beta_div.df$group, levels = c("0ppm","50ppm","500ppm"))
+
+za_within_beta_div.plot <- ggplot(za_within_beta_div.df,
+                                  aes(x = group,
+                                      y = bray))
+za_within_beta_div.plot +
+  geom_boxplot(fill = "darkgrey")+
+  geom_point(size = 2) +
+  theme(text = element_text(size=20),
+        axis.text.x  = element_text(colour = "black"),
+        axis.text.y  = element_text(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_blank())+
+  xlab("")+
+  ylab("Intra-group beta-diversity")
+  
+
+#MZD within group beta diversity
+kruskal.test(list(bdiv_wk5.matrix[25:32, 25:32][upper.tri(bdiv_wk5.matrix[25:32, 25:32])],
+                  bdiv_wk5.matrix[33:40,33:40][upper.tri(bdiv_wk5.matrix[33:40,33:40])],
+                  bdiv_wk5.matrix[41:48,41:48][upper.tri(bdiv_wk5.matrix[41:48,41:48])]
+))
+
+
+#MZD within group beta diversity posthoc
+
+pairwise.wilcox.test((c(bdiv_wk5.matrix[25:32, 25:32][upper.tri(bdiv_wk5.matrix[25:32, 25:32])],
+                        bdiv_wk5.matrix[33:40,33:40][upper.tri(bdiv_wk5.matrix[33:40,33:40])],
+                        bdiv_wk5.matrix[41:48,41:48][upper.tri(bdiv_wk5.matrix[41:48,41:48])]
+)),
+
+g= rep(c(1,2,3), times = rep(28, times =3)),
+p.adjust.method = "fdr"
+)
+
+mzd_within_beta_div.df <- cbind( bray = c(bdiv_wk5.matrix[25:32, 25:32][upper.tri(bdiv_wk5.matrix[25:32, 25:32])],
+                  bdiv_wk5.matrix[33:40,33:40][upper.tri(bdiv_wk5.matrix[33:40,33:40])],
+                  bdiv_wk5.matrix[41:48,41:48][upper.tri(bdiv_wk5.matrix[41:48,41:48])]
+), group = rep(c("0ppm","50ppm","500ppm"), 
+times = c(length(bdiv_wk5.matrix[25:32, 25:32][upper.tri(bdiv_wk5.matrix[25:32, 25:32])]),  length(bdiv_wk5.matrix[33:40,33:40][upper.tri(bdiv_wk5.matrix[33:40,33:40])]), length(bdiv_wk5.matrix[41:48,41:48][upper.tri(bdiv_wk5.matrix[41:48,41:48])])                                                                                                      )))
+
+mzd_within_beta_div.df <- as.data.frame(mzd_within_beta_div.df)
+mzd_within_beta_div.df$bray = as.numeric(mzd_within_beta_div.df$bray)
+mzd_within_beta_div.df$group = factor(mzd_within_beta_div.df$group, levels = c("0ppm","50ppm","500ppm"))
+
+mzd_within_beta_div.plot <- ggplot(mzd_within_beta_div.df,
+                                  aes(x = group,
+                                      y = bray))
+mzd_within_beta_div.plot +
+  geom_boxplot(fill = "steelblue")+
+  geom_point(size = 2)+
+  theme(text = element_text(size=20),
+        axis.text.x  = element_text(colour = "black"),
+        axis.text.y  = element_text(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_blank()) + 
+  xlab("")+
+  ylab("Intra-group beta-diversity")
+  
+
+
+
+#Shannon ZA
+
+zho_alpha_div_5wk_ZA.df<- zho_alpha_div.df[which(
+  zho_alpha_div.df$comb.group %in%
+    c("ZA_0iAs_5", "ZA_50iAs_5", "ZA_500iAs_5")) ,,drop=F]
+
+kruskal.test(zho_alpha_div_5wk_ZA.df$shannon ~ zho_alpha_div_5wk_ZA.df$Group)
+
+cor.test(zho_alpha_div_5wk_ZA.df$shannon,
+         zho_alpha_div_5wk_ZA.df$ars_conc,
+         method = "spearman")
+
+zho_alpha_div_5wk_ZA.plot <- ggplot(zho_alpha_div_5wk_ZA.df,
+                                    aes(x = factor(ars_conc),
+                                        y = shannon))
+zho_alpha_div_5wk_ZA.plot + 
+  geom_boxplot(fill = "steelblue")+
+  geom_point(size = 2)+
+  theme(text = element_text(size=20),
+        axis.text.x  = element_text(colour = "black"),
+        axis.text.y  = element_text(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_blank()) + 
+  xlab("")+
+  ylab("Shannon")
+
+#Shannon ZD
+
+zho_alpha_div_5wk_ZD.df<- zho_alpha_div.df[which(
+  zho_alpha_div.df$comb.group %in%
+    c("ZD_0iAs_5", "ZD_50iAs_5", "ZD_500iAs_5")) ,,drop=F]
+
+kruskal.test(zho_alpha_div_5wk_ZD.df$shannon ~ zho_alpha_div_5wk_ZD.df$Group)
+
+
+pairwise.wilcox.test(zho_alpha_div_5wk_ZD.df$shannon,
+                          g= zho_alpha_div_5wk_ZD.df$Group,
+                          p.adjust.method = "holm"
+)
+
+
+
+cor.test(zho_alpha_div_5wk_ZD.df$shannon,
+         zho_alpha_div_5wk_ZD.df$ars_conc,
+         method = "spearman")
+
+
+zho_alpha_div_5wk_ZD.plot <- ggplot(zho_alpha_div_5wk_ZD.df,
+                                    aes(x = factor(ars_conc),
+                                        y = shannon))
+zho_alpha_div_5wk_ZD.plot + 
+  geom_boxplot(fill = "darkgrey")+
+  geom_point(size = 2)+
+  theme(text = element_text(size=20),
+        axis.text.x  = element_text(colour = "black"),
+        axis.text.y  = element_text(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_blank()) + 
+  xlab("")+
+  ylab("Shannon")
+
+# NMDS 5wk zinc adequate otu 
+
+
+zho_5wk_otus_za.df <- zho_otus.df[,49:72,drop=F]
+zho_5wk_mapping_za.df <- zho_mapping.df[49:72,,drop=F]
+zho_5wk_otus_za.nmds <- metaMDS(t(zho_5wk_otus_za.df),
+                                distance = "bray",
+                                k = 5)
+
+zho_5wk_otus_za_nmds.df <- zho_5wk_otus_za.nmds$points
+
+zho_5wk_otus_za_nmds.df <- zho_5wk_otus_za_nmds.df[
+  rownames(zho_5wk_mapping_za.df),,drop=F]
+zho_5wk_otus_za_nmds.df <- as.data.frame(zho_5wk_otus_za_nmds.df)
+
+zho_5wk_otus_za_nmds.df <- cbind(zho_5wk_otus_za_nmds.df,
+                                 group=
+                                   zho_5wk_mapping_za.df$Group,
+                                 arsenic_conc =
+                                   zho_5wk_mapping_za.df$ars_conc)
+
+zho_5wk_otus_za_nmds.df$group <-
+  as.factor(zho_5wk_otus_za_nmds.df$group)
+zho_5wk_otus_za_nmds.df$arsenic_conc <-
+  as.factor(zho_5wk_otus_za_nmds.df$arsenic_conc)
+
+
+zho_bray_5wk_za.plot <- ggplot(zho_5wk_otus_za_nmds.df,
+                               aes(x = MDS1,
+                                   y = MDS2,
+                                   colour = arsenic_conc)
+)
+
+
+zho_bray_5wk_za.plot +
+  geom_point(size =10 )+
+  stat_ellipse(geom="polygon", aes(fill = arsenic_conc), alpha = .2)+
+  theme(text = element_text(size=20),
+        axis.text.x  = element_text(colour = "black"),
+        axis.text.y  = element_text(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_blank()
+  ) +
+  ylab("MDS2") +
+  xlab("MDS1") +
+  scale_color_hue("Arsenic (ppb)", l = 50, c = 50)+
+  scale_fill_hue("Arsenic (ppb)", l = 50, c = 50)
+
+
+# NMDS 5wk zinc deficient otu 
+
+zho_5wk_otus_zd.df <- zho_otus.df[,73:96,drop=F]
+zho_5wk_mapping_zd.df <- zho_mapping.df[73:96,,drop=F]
+
+zho_5wk_otus_zd.nmds <- metaMDS(t(zho_5wk_otus_zd.df),
+                                distance = "bray",
+                                k = 5)
+
+zho_5wk_otus_zd_nmds.df <- zho_5wk_otus_zd.nmds$points
+
+zho_5wk_otus_zd_nmds.df <- zho_5wk_otus_zd_nmds.df[
+  rownames(zho_5wk_mapping_zd.df),,drop=F]
+zho_5wk_otus_zd_nmds.df <- as.data.frame(zho_5wk_otus_zd_nmds.df)
+
+zho_5wk_otus_zd_nmds.df <- cbind(zho_5wk_otus_zd_nmds.df,
+                                 group=
+                                   zho_5wk_mapping_zd.df$Group,
+                                 arsenic_conc =
+                                   zho_5wk_mapping_zd.df$ars_conc)
+
+zho_5wk_otus_zd_nmds.df$group <-
+  as.factor(zho_5wk_otus_zd_nmds.df$group)
+zho_5wk_otus_zd_nmds.df$arsenic_conc <-
+  as.factor(zho_5wk_otus_zd_nmds.df$arsenic_conc)
+
+
+zho_bray_5wk_zd.plot <- ggplot(zho_5wk_otus_zd_nmds.df,
+                               aes(x = MDS1,
+                                   y = MDS2,
+                                   colour = arsenic_conc)
+)
+
+zho_bray_5wk_zd.plot +
+  geom_point(size =10 )+
+  stat_ellipse(geom="polygon", aes(fill = arsenic_conc), alpha = .2)+
+  theme(text = element_text(size=20),
+        axis.text.x  = element_text(colour = "black"),
+        axis.text.y  = element_text(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_blank()
+  ) +
+  ylab("MDS2") +
+  xlab("MDS1") +
+  scale_color_hue("Arsenic (ppb)", l = 50, c = 50)+
+  scale_fill_hue("Arsenic (ppb)", l = 50, c = 50)
+
+
+#Adonis tests
+
+
+zho_otus_5wk.adonis <- adonis(t(zho_otus.df[,49:96]) ~
+                                zho_mapping.df[49:96,"zinc_stat"] *
+                                zho_mapping.df[49:96,"ars_conc"],
+                              permutations = 5000)
+
+zho_otus_5wk_za.adonis <- adonis(t(zho_otus.df[,49:72]) ~
+                                   zho_mapping.df[49:72,"ars_conc"],
+                                 permutations = 5000)
+
+zho_otus_5wk_mzd.adonis <- adonis(t(zho_otus.df[,73:96]) ~
+                                    zho_mapping.df[73:96,"ars_conc"],
+                                  permutations = 5000)
+
+
+```
+
+Figure 5
+```{r}
+
+zho.obj2 <- NULL
+xdf <- NULL
+xdf <- t(zho_genus.df[,49:96])
+xmeta <- zho_mapping.df[49:96,]
+
+xdf <- as.data.frame(cbind(xdf,
+                           #name    = rownames(xdf),
+                           arsenic = xmeta$ars_conc,
+                           mouse   = xmeta$mouse,
+                           zinc    = xmeta$zinc_stat,
+                           zn_conc = xmeta$zinc_plasma,
+                           group   = xmeta$Group,
+                           adip    = xmeta$adiponectin,
+                           comet   = xmeta$comet,
+                           week    = xmeta$Week
+)
+)
+
+
+x <- melt(xdf, id.vars = c(
+  "arsenic",
+  "mouse",
+  "zinc",
+  "zn_conc",
+  "group",
+  "adip",
+  "comet",
+  "week")
+)
+
+y <- melt(t(zho_genus.df[,1:48]))
+
+x$start_abd <- y$value
+
+zho.obj2$genus <- x
+zho.obj2$genus$arsenic <- as.numeric(zho.obj2$genus$arsenic)
+zho.obj2$genus$value <- as.numeric(zho.obj2$genus$value)
+
+zho.obj2$genera_models <- NULL
+
+genera.names <- unique(zho.obj2$genus$variable)
+genera.names <- as.character(genera.names)
+
+for(i in 1:length(genera.names)){
+  temp.df <- zho.obj2$genus[which(zho.obj2$genus$variable == genera.names[i]),]
+  if(sum(temp.df$value) ==0){
+    next
+  }
+  temp.name <- genera.names[i]
+  zho.obj2$genera_models[[temp.name]] <- glm.nb(value ~ start_abd +
+                                                 zinc *
+                                                 arsenic,
+                                               data = temp.df)
+}
+
+
+#I'ma just gonna take some of this snizz right meer
+temp.coef       <- NULL # nbglm estimate
+temp.pvec       <- NULL # nbglm pvals
+temp.coef_names <- NULL #names of the coef and the taxa name
+temp.otu_names  <- NULL
+
+for(i in 1:length(zho.obj2$genera_models)){
+  print(names(zho.obj2$genera_models)[i]) # just fo sho
+  zfit0 <- summary(zho.obj2$genera_models[[i]])
+  n.names <- paste(rownames(zfit0$coefficients),
+                   names(zho.obj2$genera_models)[i],
+                   sep = "__") #paste taxa name with the coef name
+
+  temp.pvec       <- c(temp.pvec, unlist(zfit0$coefficients[,4]))
+  temp.coef       <- c(temp.coef, unlist(zfit0$coefficients[,1]))
+  temp.coef_names <- c(temp.coef_names, n.names)
+  temp.otu_names  <- c(temp.otu_names,
+                       rep(names(zho.obj2$genera_models)[i],
+                           times = length(unlist(zfit0$coefficients[,1]))))
+
+}
+
+#Now put the lime in the coconut and mix it all together
+
+zho.obj2$sig_models <- (cbind(combined_name = temp.coef_names,
+                              OTU = temp.otu_names,
+                              Estimate = temp.coef,
+                              pvalue = temp.pvec,
+           qvalue = (qvalue::qvalue(temp.pvec))$qvalues))
+
+#these rownames are pretty meaningless so they are gone!
+
+rownames(zho.obj2$sig_models) <- NULL
+
+#next we set the threshold and collect names of taxa that fall into it
+
+keeps.otu_names <- NULL
+for( i in 1:nrow(zho.obj2$sig_models)){
+  if(length(grep(pattern = "Intercept", zho.obj2$sig_models[i,"combined_name"]))){
+    next()
+  }else{
+    if(zho.obj2$sig_models[i,"qvalue"] < 0.2) {
+        keeps.otu_names <- c(keeps.otu_names, zho.obj2$sig_models[i,"OTU"])
+    }
+  }
+}
+
+keeps.otu_names <- unique(keeps.otu_names)
+
+# One issue here is that some internal R snizz drops the NAs from
+zho.obj2$sig_models <- zho.obj2$sig_models[which(zho.obj2$sig_models[,"OTU"]
+                                                 %in% keeps.otu_names ),]
+
+drops <- grep(x = zho.obj2$sig_models[,"combined_name"], pattern = "Intercept")
+
+zho.obj2$sig_models <- zho.obj2$sig_models[-drops,]
+zho.obj2$sig_models <- cbind(zho.obj2$sig_models,
+                        param = rep(c("Start","Diet", "[As]", "Diet:[As]"),
+                                    times = 12)
+                        )
+
+#add short names (lowest taxonomic assignment)
+short.names <- c("Adlercreutzia",
+                 "Rikenellaceae",
+                 "S24-7",
+                 "Clostridiales",
+                 "Clostridium",
+                 "Lachnospiraceae",
+                 "Epulopiscium",
+                 "[Ruminococcus]",
+                 "Peptostreptococcaceae",
+                 "Erysipelotrichaceae",
+                 "Plesiomonas",
+                 "Akkermansia")
+
+zho.obj2$sig_models <- cbind(zho.obj2$sig_models,
+                             short_name = rep(short.names,
+                                 times = rep(4, 12))
+)
+
+zho.obj2$sig_models <- as.data.frame(zho.obj2$sig_models)
+
+zho.obj2$sig_models$Estimate <- as.numeric(zho.obj2$sig_models$Estimate)
+zho.obj2$sig_models$pvalue   <- as.numeric(zho.obj2$sig_models$pvalue)
+zho.obj2$sig_models$qvalue   <- as.numeric(zho.obj2$sig_models$qvalue)
+
+zho.obj2$sig_models$rescale_estimate <- cut(zho.obj2$sig_models$Estimate,
+                                            breaks=c(
+                                                     -10,
+                                                     -1,
+                                                     -0.1,
+                                                     -0.01,
+                                                     -0.001,
+                                                     -0.0001,
+                                                     0,
+                                                     0.0001,
+                                                     0.001,
+                                                     0.01,
+                                                     0.1,
+                                                     1,
+                                                     10
+                                                     ),
+                                            labels=c("<-1",
+                                                     "-1 - -0.1",
+                                                     "-0.1 - -0.01",
+                                                     "-0.01 - -0.001",
+                                                     "-0.001 - -0.0001",
+                                                     "-0.0001 - 0",
+                                                     "0 - 0.0001",
+                                                     "0.0001 - 0.001",
+                                                     "0.001 - 0.01",
+                                                     "0.01 - 0.1",
+                                                     "0.1 - 1",
+                                                     ">1")
+)
+
+zho.obj2$sig_models$rescale_pval <- cut(zho.obj2$sig_models$pvalue,
+                            breaks=c(1e-100, 1e-3, 1e-2, 5e-2, 1),
+                            labels=c("***",
+                                     "**",
+                                     "*",
+                                     "")
+)
+
+zho.obj2$sig_models$rescale_qval <- cut(zho.obj2$sig_models$qval,
+                            breaks=c(1e-100, 0.2,1),
+                            labels=c("*",
+                                     "")
+)
+
+
+#reverse levels so that this will show up right in scale
+zho.obj2$sig_models$rescale_estimate <-
+  factor(as.character(zho.obj2$sig_models$rescale_estimate),
+    levels = rev(levels(zho.obj2$sig_models$rescale_estimate)))
+
+zho.obj2$sig_models$short_name <- factor(zho.obj2$sig_models$short_name)
+
+#colors
+
+my_reds  <- colorRampPalette(colors = c("white", "red"))
+my_blues <- colorRampPalette(colors = c("blue", "white"))
+my_blues_red <- colorRampPalette(colors = c("blue4", "white", "red4"))
+
+#generate a heatmap
+
+zho_sig_models.tile <- ggplot(zho.obj2$sig_models,
+                               aes(x= param,
+                                   y = short_name,
+                                   fill = rescale_estimate))
+                                 
+
+zho_sig_models.tile +
+  geom_tile()+
+  scale_fill_manual(values=c(my_blues(100)[seq(70, 100, by=6)],
+                             my_reds(100)[seq(1, 36, by=6)]),
+                    na.value="grey",
+                    drop=F)+
+  scale_x_discrete(expand = c(0,0),
+                   labels = c("[As]",
+                              "Diet(ZA)",
+                              "Diet(ZA):[As]",
+                              "Start"
+                              )
+                   )+
+  scale_y_discrete(expand = c(0,0))+
+  geom_text(aes(label=rescale_qval),
+            nudge_y = -.2)+
+  theme(text = element_text(size=8),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.key = element_blank(),
+        axis.text.x = element_text(angle = 30, vjust = .9, hjust = 1, size =16),
+        axis.text = element_text(color = "black"),
+        legend.title=element_blank()
+  )+
+  ylab("")+
+  xlab("")
+```
+
+In the original manuscript we used correlation analysis to identify associations
+between the microbiome and host physiological parameters. However, this fails 
+to distinguish between cases where microbiome changes may strongly covary with 
+arsenic exposure or zinc status. To mitigate this concern we now employ a regression 
+approach wherein two linear regressions are fit for each taxa. The first is the 
+parsimonious model the includes the effects of arsenic, zinc and their interaction 
+on the physiological parameter (e.g., plasma zinc). The second model adds a parameter 
+of taxonomic abundance. An anova is used to determine if this parameter significantly altered the fit. False discover rate is controlled by qvalue (q<0.2). 
+
+```{r}
+library(qvalue)
+#adiponectin vs the microbiome
+zho.obj2$adipo_models_add <- NULL
+
+genera.names <- unique(zho.obj2$genus$variable)
+genera.names <- as.character(genera.names)
+
+for(i in 1:length(genera.names)){
+  temp.df <- zho.obj2$genus[which(zho.obj2$genus$variable == genera.names[i]),]
+  if(sum(temp.df$value) ==0){
+    next
+  }
+  temp.name <- genera.names[i]
+  zho.obj2$adipo_models_add[[temp.name]] <- NULL
+
+  zho.obj2$adipo_models_add[[temp.name]]$fit0 <-
+    lm(adip ~ zinc * as.numeric(arsenic), data = temp.df)
+
+  zho.obj2$adipo_models_add[[temp.name]]$fit1 <-
+    lm(adip ~ zinc * as.numeric(arsenic) + value, data = temp.df)
+
+  zho.obj2$adipo_models_add[[temp.name]]$aov.fit <-
+    anova(zho.obj2$adipo_models_add[[temp.name]]$fit0,
+        zho.obj2$adipo_models_add[[temp.name]]$fit1)
+
+}
+
+adip_anova.pvec <- NULL
+adip_anova.names <- NULL 
+adip_fit1.coef   <- NULL 
+
+for(i in 1:length(zho.obj2$adipo_models_add)){
+    
+  adip_anova.pvec <- c(adip_anova.pvec,
+                  zho.obj2$adipo_models_add[[i]]$aov.fit[2,6])
+  adip_anova.names <- c(adip_anova.names, 
+                        names(zho.obj2$adipo_models_add)[i])
+  adip_fit1.coef <- c(adip_fit1.coef, 
+                coefficients(zho.obj2$adipo_models_add[[i]]$fit1)[4])
+
+}
+
+adip_anova.df <- cbind(genus = adip_anova.names,
+                       estimate = adip_fit1.coef,
+                       pvalue = adip_anova.pvec,
+                       qvalue  = qvalue(adip_anova.pvec)$qvalue)
+
+
+adip_anova.df <- as.data.frame(adip_anova.df)
+
+adip_anova.df[which(adip_anova.df$qvalue < 0.2),]
+
+rownames(adip_anova.df) <- adip_anova.df$genus
+
+# Associations between comet and microbiome 
+
+zho.obj2$comet_models_add <- NULL
+
+genera.names <- unique(zho.obj2$genus$variable)
+genera.names <- as.character(genera.names)
+
+for(i in 1:length(genera.names)){
+  temp.df <- zho.obj2$genus[which(zho.obj2$genus$variable == genera.names[i]),]
+  if(sum(temp.df$value) ==0){
+    next
+  }
+  temp.name <- genera.names[i]
+  zho.obj2$comet_models_add[[temp.name]] <- NULL
+
+  zho.obj2$comet_models_add[[temp.name]]$fit0 <-
+    lm(comet ~ zinc * as.numeric(arsenic), data = temp.df)
+
+  zho.obj2$comet_models_add[[temp.name]]$fit1 <-
+    lm(comet ~ zinc * as.numeric(arsenic) + value, data = temp.df)
+
+  zho.obj2$comet_models_add[[temp.name]]$aov.fit <-
+    anova(zho.obj2$comet_models_add[[temp.name]]$fit0,
+          zho.obj2$comet_models_add[[temp.name]]$fit1)
+
+}
+
+comet_anova.pvec <- NULL
+comet_anova.names <- NULL 
+comet_fit1.coef   <- NULL 
+
+for(i in 1:length(zho.obj2$comet_models_add)){
+    
+  comet_anova.pvec <- c(comet_anova.pvec,
+                  zho.obj2$comet_models_add[[i]]$aov.fit[2,6])
+  comet_anova.names <- c(comet_anova.names, 
+                        names(zho.obj2$comet_models_add)[i])
+  comet_fit1.coef <- c(comet_fit1.coef, 
+                coefficients(zho.obj2$comet_models_add[[i]]$fit1)[4])
+
+}
+
+comet_anova.df <- cbind(genus = comet_anova.names,
+                       estimate = comet_fit1.coef,
+                       pvalue = comet_anova.pvec,
+                       qvalue  = qvalue(comet_anova.pvec)$qvalue)
+
+
+
+
+comet_anova.df <- as.data.frame(comet_anova.df)
+
+rownames(comet_anova.df) <- comet_anova.df$genus
+comet_anova.df[which(comet_anova.df$qvalue < 0.2),] #no sig
+
+
+
+
+#Plasma zinc
+
+zho.obj2$zn_conc_models_add <- NULL
+
+genera.names <- unique(zho.obj2$genus$variable)
+genera.names <- as.character(genera.names)
+
+for(i in 1:length(genera.names)){
+  temp.df <- zho.obj2$genus[which(zho.obj2$genus$variable == genera.names[i]),]
+  if(sum(temp.df$value) ==0){
+    next
+  }
+  temp.name <- genera.names[i]
+  zho.obj2$zn_conc_models_add[[temp.name]] <- NULL
+
+  zho.obj2$zn_conc_models_add[[temp.name]]$fit0 <-
+    lm(zn_conc ~ zinc * as.numeric(arsenic), data = temp.df)
+
+  zho.obj2$zn_conc_models_add[[temp.name]]$fit1 <-
+    lm(zn_conc ~ zinc * as.numeric(arsenic) + value, data = temp.df)
+
+  zho.obj2$zn_conc_models_add[[temp.name]]$aov.fit <-
+    anova(zho.obj2$zn_conc_models_add[[temp.name]]$fit0,
+          zho.obj2$zn_conc_models_add[[temp.name]]$fit1)
+
+}
+
+
+plasma_zinc_anova.pvec  <- NULL
+plasma_zinc_anova.names <- NULL 
+plasma_zinc_fit1.coef   <- NULL 
+
+for(i in 1:length(zho.obj2$zn_conc_models_add)){
+  
+  plasma_zinc_anova.pvec <- c(plasma_zinc_anova.pvec,
+                        zho.obj2$zn_conc_models_add[[i]]$aov.fit[2,6])
+  plasma_zinc_anova.names <- c(plasma_zinc_anova.names, 
+                         names(zho.obj2$zn_conc_models_add)[i])
+  plasma_zinc_fit1.coef <- c(plasma_zinc_fit1.coef, 
+                             coefficients(zho.obj2$zn_conc_models_add[[i]]$fit1)[4])
+  
+}
+
+plasma_zinc_anova.df <- cbind(genus = plasma_zinc_anova.names,
+                              estimate = plasma_zinc_fit1.coef,
+                              pvalue = plasma_zinc_anova.pvec,
+                              qvalue  = qvalue(plasma_zinc_anova.pvec)$qvalue)
+
+
+plasma_zinc_anova.df <- as.data.frame(plasma_zinc_anova.df)
+rownames(plasma_zinc_anova.df) <- plasma_zinc_anova.df$genus
+
+plasma_zinc_anova.df[which(plasma_zinc_anova.df$qvalue < 0.2),]
+
+```
+
